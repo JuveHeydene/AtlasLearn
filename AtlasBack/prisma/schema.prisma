@@ -1,0 +1,547 @@
+/// This is your Prisma schema file,
+/// learn more about it in the docs: https://pris.ly/d/prisma-schema
+///
+/// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+/// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+/// The client generator for Prisma Client
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// The datasource for connecting to MongoDB
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+/// Enum representing different types of questions
+enum QuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+/// Enum representing different user roles
+enum Role {
+  STUDENT
+  TEACHER
+  ADMIN
+}
+
+enum QuizStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum EnrollmentRole {
+  STUDENT
+  TA
+  AUDITOR
+}
+
+enum Questiondifficulty {
+  EASY
+  INTERMEDIATE
+  ADVANCE
+}
+
+enum QuizType {
+  MIXED
+  FIXED
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum AssignmentStatus {
+  GRADED
+  SUBMITTED
+  NOTSUBMITTED
+}
+
+/// Enum representing different file types for course materials
+enum fileType {
+  PDF
+  DOC
+  DOCX
+  PPT
+  PPTX
+  XLS
+  XLSX
+  TXT
+  MP4
+  MKV
+  AVI
+  FLV
+  MOV
+  IMAGE
+  ZIP
+  RAR
+  UNKNOWN
+}
+
+/// Model representing a user in the system
+model User {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  firstName      String
+  lastName       String
+  email          String   @unique
+  password       String
+  role           Role     @default(STUDENT)
+  profilePicture String?
+  status         String   @default("offline")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // Relations
+  coursesTaught           Course[]                  @relation("TeacherCourses")
+  enrolledCourses         CourseEnrollment[]
+  quizAttempts            QuizAttempt[]
+  Quiz                    Quiz[]
+  Notification            Notification[]
+  QuizStatistics          QuizStatistics[]
+  Assignment              Assignment[]
+  AssignmentSubmission    AssignmentSubmission[]
+  CourseMaterial          CourseMaterial[]
+  progressCourses         CourseProgress[]
+  progressChapters        ChapterProgress[]
+  progressLessons         LessonProgress[]
+  completedCourses        CourseCompletion[]
+  completedChapters       ChapterCompletion[]
+  TeacherCourseEnrollment TeacherCourseEnrollment[]
+}
+
+/// Model representing a course
+model Course {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  title       String      @unique
+  description String
+  teacherId   String      @db.ObjectId
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  status      QuizStatus? @default(DRAFT)
+
+  // Relations
+  teacher         User               @relation("TeacherCourses", fields: [teacherId], references: [id])
+  enrollments     CourseEnrollment[]
+  quizzes         Quiz[]
+  coursematerials CourseMaterial[]
+
+  Chapter                 Chapter[]
+  QuizStatistics          QuizStatistics[]
+  Assignment              Assignment[]
+  progresses              CourseProgress[]
+  completions             CourseCompletion[]
+  Notification            Notification[]
+  TeacherCourseEnrollment TeacherCourseEnrollment[]
+}
+
+/// Model representing a course enrollment
+model CourseEnrollment {
+  id         String         @id @default(auto()) @map("_id") @db.ObjectId
+  studentId  String         @db.ObjectId
+  courseId   String         @db.ObjectId
+  enrolledAt DateTime       @default(now())
+  role       EnrollmentRole @default(STUDENT) // STUDENT, TA, AUDITOR
+
+  // Relations
+  student User   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course  Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, courseId]) // Prevent duplicate enrollments
+}
+
+/// Model representing a teacher course enrollment
+model TeacherCourseEnrollment {
+  id         String         @id @default(auto()) @map("_id") @db.ObjectId
+  teacherId  String         @db.ObjectId
+  courseId   String         @db.ObjectId
+  enrolledAt DateTime       @default(now())
+  role       EnrollmentRole @default(AUDITOR) // STUDENT, TA, AUDITOR
+
+  // Relations
+  teacher User   @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  course  Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([teacherId, courseId]) // Prevent duplicate enrollments
+}
+
+model Chapter {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  description String?
+  order       Int // For sequencing (1, 2, 3...)
+  courseId    String   @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  lessons        Lesson[]
+  course         Course              @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  QuizAttempt    QuizAttempt[]
+  Assignment     Assignment[]
+  Quiz           Quiz[]
+  progresses     ChapterProgress[]
+  completions    ChapterCompletion[]
+  CourseMaterial CourseMaterial[]
+  Notification   Notification[]
+
+  // Ensure unique chapter titles per course
+  @@unique([courseId, title])
+  // For proper ordering
+  @@index([courseId, order])
+}
+
+model Lesson {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  title     String
+  content   Json? // Raw editor content (JSON)
+  html      String? // Rendered HTML content
+  duration  Int? // secondes
+  order     Int // Sequence within chapter
+  chapterId String   @db.ObjectId
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  chapter         Chapter          @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  coursematerials CourseMaterial[] // PDFs, videos, etc.
+  Assignment      Assignment[]
+  progresses      LessonProgress[]
+
+  // Unique lesson titles per chapter
+  @@unique([chapterId, title])
+  // Optimized ordering
+  @@index([chapterId, order])
+}
+
+/// Model representing course materials
+model CourseMaterial {
+  id         String    @id @default(auto()) @map("_id") @db.ObjectId
+  courseId   String    @db.ObjectId
+  userId     String?   @db.ObjectId
+  chapterId  String?   @db.ObjectId
+  lessonId   String?   @db.ObjectId
+  fileUrl    String?
+  fileName   String?   @default("UNKNOWN")
+  fileType   fileType? @default(PDF)
+  content    String?
+  uploadedAt DateTime  @default(now())
+
+  // Relations
+  course  Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  user    User?    @relation(fields: [userId], references: [id])
+  Lesson  Lesson?  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  chapter Chapter? @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+}
+
+/// Model representing a quiz
+model Quiz {
+  id            String     @id @default(auto()) @map("_id") @db.ObjectId
+  title         String
+  description   String     @default("Trainning Quiz")
+  duration      Int        @default(600) // 600 secondes = 10 minutes
+  totalScore    Float      @default(100)
+  passingScore  Float      @default(50)
+  courseId      String?    @db.ObjectId
+  chapterId     String?    @db.ObjectId
+  createdBy     String     @db.ObjectId
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  status        QuizStatus @default(DRAFT)
+  viewAnswers   Boolean?   @default(false)
+  quizcategorie QuizType   @default(FIXED)
+
+  // Relations
+  course      Course?       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  creator     User          @relation(fields: [createdBy], references: [id])
+  chapter     Chapter?      @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  questions   Question[]
+  QuizAttempt QuizAttempt[]
+}
+
+/// Model representing a question in a quiz
+model Question {
+  id           String             @id @default(auto()) @map("_id") @db.ObjectId
+  quizId       String             @db.ObjectId
+  text         String
+  fileUrl      String?
+  fileName     String?
+  questionType QuestionType       @default(MCQ)
+  difficulty   Questiondifficulty @default(EASY)
+
+  // Relations
+  quiz          Quiz            @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  options       AnswerOption[]
+  correct       CorrectAnswer[]
+  AttemptAnswer AttemptAnswer[]
+
+  @@unique([quizId, text]) // Empêche les doublons
+  @@index([quizId, difficulty]) // For quiz assembly
+}
+
+/// Model representing an answer option for a question
+model AnswerOption {
+  id         String  @id @default(auto()) @map("_id") @db.ObjectId
+  questionId String  @db.ObjectId
+  text       String
+  isCorrect  Boolean @default(false)
+
+  // Relations
+  question      Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  correctAnswer CorrectAnswer[]
+}
+
+/// model for correct answers
+model CorrectAnswer {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  questionId String   @db.ObjectId
+  optionId   String?  @db.ObjectId // For MCQ questions (ID of the correct option)
+  isTrue     Boolean? // For TRUE_FALSE questions (true or false)
+  answerText String? // For SHORT_ANSWER questions (correct free-text answer)
+
+  // Relations
+  question Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  option   AnswerOption? @relation(fields: [optionId], references: [id], onDelete: Cascade)
+
+  @@unique([questionId, optionId]) // Empêche les doublons
+}
+
+/// Model representing an attempt at a quiz
+model QuizAttempt {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  quizId        String   @db.ObjectId
+  studentId     String   @db.ObjectId
+  chapterId     String?  @db.ObjectId
+  score         Float    @default(0)
+  attemptNumber Int      @default(1)
+  submittedAt   DateTime @default(now())
+  timeTaken     Int // Time taken to complete the test (in seconds)
+
+  // Relations 
+  quiz    Quiz            @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  chapter Chapter?        @relation(fields: [chapterId], references: [id])
+  student User            @relation(fields: [studentId], references: [id])
+  answers AttemptAnswer[]
+
+  @@index([studentId, quizId])
+  @@index([quizId, score, timeTaken]) // For leaderboards
+  @@index([submittedAt]) // For time-based queries
+}
+
+/// Model representing an attempt  to a question in a quiz attempt
+model AttemptAnswer {
+  id            String   @id @default(auto()) @map("_id") @db.ObjectId
+  attemptId     String   @db.ObjectId
+  questionId    String   @db.ObjectId
+  answerText    String? // For structural questions (free-text answers)
+  chosenOptions String[] // For multiple-choice questions (ID of the chosen option)
+  dualOption    Boolean? // For True/false-choice questions ( of the chosen option)
+  isCorrect     Boolean? // Whether the answer is correct (calculated later)
+
+  // Relations
+  attempt  QuizAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question Question    @relation(fields: [questionId], references: [id])
+}
+
+model Assignment {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  title       String
+  description String
+  dueDate     DateTime
+  courseId    String   @db.ObjectId
+  chapterId   String?  @db.ObjectId
+  lessonId    String?  @db.ObjectId
+  createdBy   String   @db.ObjectId
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  maxScore    Float    @default(100)
+  fileUrl     String?
+  fileName    String?
+  filetype    String?
+
+  // Relations
+  course      Course                 @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  chapter     Chapter?               @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+  lesson      Lesson?                @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  creator     User                   @relation(fields: [createdBy], references: [id])
+  submissions AssignmentSubmission[]
+
+  // Indexes
+  @@index([courseId])
+  @@index([dueDate])
+}
+
+model AssignmentSubmission {
+  id           String           @id @default(auto()) @map("_id") @db.ObjectId
+  assignmentId String           @db.ObjectId
+  studentId    String           @db.ObjectId
+  fileUrl      String? // PDF/DOCX...others submission
+  fileName     String?
+  filetype     String?
+  submittedAt  DateTime         @default(now())
+  gradedAt     DateTime         @default(now())
+  grade        Float?
+  status       AssignmentStatus @default(NOTSUBMITTED)
+  feedback     String?
+
+  // Relations
+  assignment Assignment @relation(fields: [assignmentId], references: [id])
+  student    User       @relation(fields: [studentId], references: [id])
+
+  @@unique([assignmentId, studentId]) // One submission per student
+}
+
+/// Model representing a notification for a user
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  creatorId String   @db.ObjectId
+  studentId String?  @db.ObjectId
+  courseId  String?  @db.ObjectId
+  chapterId String?  @db.ObjectId
+  title     String
+  message   String?
+  seen      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Relations
+  creator User     @relation(fields: [creatorId], references: [id])
+  course  Course?  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  chapter Chapter? @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+}
+
+/// Model representing analytics data
+model Analytics {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  // totalUsers    Int      @default(0)
+  // totalQuizzes  Int      @default(0)
+  // totalAttempts Int      @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+model QuizStatistics {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  userId   String @db.ObjectId
+  courseId String @db.ObjectId
+
+  // Metrics
+  quizzesCompleted Int
+  avgQuizScore     Float
+  strongestTopic   String
+  weakestTopic     String
+  lastUpdatedAt    DateTime @updatedAt
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@index([userId])
+  @@index([courseId])
+}
+
+model SubmitQuiz {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @db.ObjectId
+  firstName String
+  lastName  String
+  score     Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CourseProgress {
+  id             String         @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String         @db.ObjectId
+  courseId       String         @db.ObjectId
+  status         ProgressStatus @default(NOT_STARTED)
+  progress       Float          @default(0) // 0-100 percentage
+  timeSpent      Int            @default(0) // in seconds
+  startedAt      DateTime?
+  completedAt    DateTime?
+  lastAccessedAt DateTime       @default(now())
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@unique([userId, courseId])
+  @@index([userId])
+  @@index([courseId])
+}
+
+model ChapterProgress {
+  id             String         @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String         @db.ObjectId
+  chapterId      String         @db.ObjectId
+  status         ProgressStatus @default(NOT_STARTED)
+  progress       Float          @default(0) // 0-100 percentage
+  startedAt      DateTime?
+  completedAt    DateTime?
+  timeSpent      Int            @default(0) // in seconds
+  lastAccessedAt DateTime       @default(now())
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id])
+  chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@unique([userId, chapterId])
+  @@index([userId])
+  @@index([chapterId])
+}
+
+model LessonProgress {
+  id                   String         @id @default(auto()) @map("_id") @db.ObjectId
+  userId               String         @db.ObjectId
+  lessonId             String         @db.ObjectId
+  status               ProgressStatus @default(NOT_STARTED)
+  isCompleted          Boolean        @default(false)
+  startedAt            DateTime?
+  completedAt          DateTime?
+  timeSpent            Int            @default(0) // in seconds
+  lastPlaybackPosition Int? // for video lessons
+  lastAccessedAt       DateTime       @default(now())
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id])
+  lesson Lesson @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  // Indexes
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([lessonId])
+}
+
+model CourseCompletion {
+  id             String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId         String   @db.ObjectId
+  courseId       String   @db.ObjectId
+  completedAt    DateTime @default(now())
+  certificateUrl String?
+
+  // Relations
+  user   User   @relation(fields: [userId], references: [id])
+  course Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+}
+
+model ChapterCompletion {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId      String   @db.ObjectId
+  chapterId   String   @db.ObjectId
+  completedAt DateTime @default(now())
+
+  // Relations
+  user    User    @relation(fields: [userId], references: [id])
+  chapter Chapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chapterId])
+}
